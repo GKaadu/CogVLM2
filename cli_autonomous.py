@@ -7,6 +7,7 @@ import time
 import torch
 import argparse
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from accelerate import init_empty_weights, dispatch_model, infer_auto_device_map
 
 import pika
 import json
@@ -77,28 +78,25 @@ def main():
     )
 
     # Load the model
-    if args.quant == 4:
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_PATH,
-            torch_dtype=TORCH_TYPE,
-            trust_remote_code=True,
-            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
-            low_cpu_mem_usage=True
-        ).eval()
-    elif args.quant == 8:
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_PATH,
-            torch_dtype=TORCH_TYPE,
-            trust_remote_code=True,
-            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-            low_cpu_mem_usage=True
-        ).eval()
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_PATH,
-            torch_dtype=TORCH_TYPE,
-            trust_remote_code=True
-        ).eval().to(DEVICE)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_PATH,
+        torch_dtype=TORCH_TYPE,
+        trust_remote_code=True
+    )
+
+    num_gpus = torch.cuda.device_count()
+    max_memory_per_gpu = "20GiB"
+    if num_gpus > 2:
+        max_memory_per_gpu = f"{round(80 / num_gpus)}GiB"
+
+    device_map = infer_auto_device_map(
+        model=model,
+        max_memory={i: max_memory_per_gpu for i in range(num_gpus)},
+        no_split_module_classes=["CogVLMDecoderLayer"]
+    )
+
+    model = dispatch_model(model, device_map=device_map)
+    model = model.eval()
 
     if rank == 0:
         print('*********** LISTENING FOR REQUESTS ***********')
@@ -113,20 +111,20 @@ def main():
                 continue
             image_path = next_message.get('image_path', '')
             print('Message received: ' + next_message['id'])
-            is_valid, image = get_valid_image(image_path)
+            is_valid = get_valid_image(image_path)
             if not is_valid:
                 post_reply('Not a valid image: ' + image_path, [], next_message['id'])
                 continue
         else:
-            image = None
+            image_path = None
 
         if world_size > 1:
-            image_broadcast_list = [image]
+            image_path_broadcast_list = [image_path]
             # todo, what is torch.distributed.broadcast_object_list?
-            torch.distributed.broadcast_object_list(image_broadcast_list, 0)
-            image = image_broadcast_list[0]
+            torch.distributed.broadcast_object_list(image_path_broadcast_list, 0)
+            image_path = image_path_broadcast_list[0]
 
-        assert image is not None
+        assert image_path is not None
 
         if rank == 0:
             query = next_message.get('query', '')
@@ -151,7 +149,7 @@ def main():
             history = json.loads(history_broadcast_list[0])
             
         try:
-            response = call_ai(image, model, tokenizer, query, history, DEVICE, TORCH_TYPE)
+            response = call_ai(image_path, model, tokenizer, query, history, DEVICE, TORCH_TYPE)
         except Exception as e:
             print(e)
             break
@@ -159,7 +157,8 @@ def main():
             post_reply(response, history, next_message['id'])
 
 
-def call_ai (image, model, tokenizer, query, history, DEVICE, TORCH_TYPE):
+def call_ai (image_path, model, tokenizer, query, history, DEVICE, TORCH_TYPE):
+    print('Calling ai with query:' +query)
     if image_path is None:
         input_by_model = model.build_conversation_input_ids(
             tokenizer,
@@ -168,7 +167,10 @@ def call_ai (image, model, tokenizer, query, history, DEVICE, TORCH_TYPE):
             template_version='chat'
         )
     else:
-        image = image.convert('RGB')
+        image = get_image(image_path)
+        if image is None:
+            print('Image did not get retrived')
+        print('about to build model version ids')
         input_by_model = model.build_conversation_input_ids(
             tokenizer,
             query=query,
@@ -180,7 +182,7 @@ def call_ai (image, model, tokenizer, query, history, DEVICE, TORCH_TYPE):
         'input_ids': input_by_model['input_ids'].unsqueeze(0).to(DEVICE),
         'token_type_ids': input_by_model['token_type_ids'].unsqueeze(0).to(DEVICE),
         'attention_mask': input_by_model['attention_mask'].unsqueeze(0).to(DEVICE),
-        'images': [[input_by_model['images'][0].to(DEVICE).to(TORCH_TYPE)]] if image is not None else None,
+        'images': [[input_by_model['images'][0].to(DEVICE).to(TORCH_TYPE)]] if image_path is not None else None,
     }
     gen_kwargs = {
         "max_new_tokens": 2048,
@@ -188,6 +190,7 @@ def call_ai (image, model, tokenizer, query, history, DEVICE, TORCH_TYPE):
         "top_k": 1,
     }
     with torch.no_grad():
+        print('about to generate')
         outputs = model.generate(**inputs, **gen_kwargs)
         outputs = outputs[:, inputs['input_ids'].shape[1]:]
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
@@ -202,15 +205,33 @@ def get_valid_image(image_path):
             response = requests.get(image_path)
             response.raise_for_status()  # Raise an error for bad status codes
             with Image.open(BytesIO(response.content)) as img:
-                img.verify(), img  # Verify that it's an image
+                img.verify()  # Verify that it's an image
+                return True
         else:
             # Local file path
             with Image.open(image_path) as img:
-                img.verify(), img  # Verify that it's an image
-        return True
+                img.verify()  # Verify that it's an image
+                return True
     except Exception as e:
         print(f"Error: {e}")
-        return False, None
+        return False
+
+
+def get_image(image_path):
+    try:
+        # Check if image_path is a URL
+        if image_path.startswith('http://') or image_path.startswith('https://'):
+            response = requests.get(image_path)
+            response.raise_for_status()  # Raise an error for bad status codes
+            with Image.open(BytesIO(response.content)).convert('RGB') as img:
+                return img
+        else:
+            # Local file path
+            with Image.open(image_path).convert('RGB') as img:
+                return img
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
 
 if __name__ == "__main__":
