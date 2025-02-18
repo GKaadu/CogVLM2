@@ -48,7 +48,7 @@ device_map = infer_auto_device_map(
     max_memory={i: max_memory_per_gpu for i in range(num_gpus)},
     no_split_module_classes=["CogVLMDecoderLayer"]
 )
-model = dispatch_model(model, device_map=device_map, dtype=TORCH_TYPE)
+model = dispatch_model(model, device_map=device_map)
 model.tie_weights()
 model = model.eval()
 
