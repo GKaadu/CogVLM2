@@ -36,21 +36,20 @@ model = AutoModelForCausalLM.from_pretrained(
     MODEL_PATH,
     torch_dtype=TORCH_TYPE,
     trust_remote_code=True,
-    device_map="auto",
 )
 
-#num_gpus = torch.cuda.device_count()
-#max_memory_per_gpu = "16GiB"
-#if num_gpus > 2:
-#    max_memory_per_gpu = f"{round(42 / num_gpus)}GiB"
+num_gpus = torch.cuda.device_count()
+max_memory_per_gpu = "22GiB"
+if num_gpus > 2:
+    max_memory_per_gpu = f"{round(42 / num_gpus)}GiB"
 
-#device_map = infer_auto_device_map(
-#    model=model,
-#    max_memory={i: max_memory_per_gpu for i in range(num_gpus)},
-#    no_split_module_classes=["CogVLMDecoderLayer"]
-#)
-#model = dispatch_model(model, device_map=device_map, dtype=TORCH_TYPE)
-#model.tie_weights()
+device_map = infer_auto_device_map(
+    model=model,
+    max_memory={i: max_memory_per_gpu for i in range(num_gpus)},
+    no_split_module_classes=["CogVLMDecoderLayer"]
+)
+model = dispatch_model(model, device_map=device_map, dtype=TORCH_TYPE)
+model.tie_weights()
 model = model.eval()
 
 text_only_template = "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions. USER: {} ASSISTANT:"
