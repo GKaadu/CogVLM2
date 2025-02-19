@@ -49,6 +49,7 @@ device_map = infer_auto_device_map(
 )
 
 model = dispatch_model(model, device_map=device_map)
+#model.tie_weights()
 model = model.eval()
 
 text_only_template = "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions. USER: {} ASSISTANT:"
