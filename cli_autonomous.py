@@ -196,6 +196,7 @@ def call_ai (image_path, model, tokenizer, query, history, DEVICE, TORCH_TYPE):
         outputs = outputs[:, inputs['input_ids'].shape[1]:]
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
         print("\nCogVLM2:", response)
+        image.close()
         return response
 
 
@@ -207,11 +208,13 @@ def get_valid_image(image_path):
             response.raise_for_status()  # Raise an error for bad status codes
             with Image.open(BytesIO(response.content)) as img:
                 img.verify()  # Verify that it's an image
+                img.close()
                 return True
         else:
             # Local file path
             with Image.open(image_path) as img:
                 img.verify()  # Verify that it's an image
+                img.close()
                 return True
     except Exception as e:
         print(f"Error: {e}")
