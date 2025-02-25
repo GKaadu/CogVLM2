@@ -67,6 +67,9 @@ def main():
     world_size = int(os.environ.get('WORLD_SIZE', 1))
     args = parser.parse_args()
 
+    print("rank",rank)
+    print("world_size",world_size)
+
     MODEL_PATH = args.model
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     TORCH_TYPE = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.get_device_capability()[
@@ -85,9 +88,7 @@ def main():
     )
 
     num_gpus = torch.cuda.device_count()
-    max_memory_per_gpu = "20GiB"
-    if num_gpus > 2:
-        max_memory_per_gpu = f"{round(80 / num_gpus)}GiB"
+    max_memory_per_gpu = "19GiB"
 
     device_map = infer_auto_device_map(
         model=model,
