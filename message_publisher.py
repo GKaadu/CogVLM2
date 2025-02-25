@@ -45,7 +45,7 @@ def wait_for_reply(message_id):
     channel.queue_declare(queue='reply_queue', durable=False)
 
     start_time = time.time()
-    timeout = 30  # seconds
+    timeout = 50  # seconds
 
     while time.time() - start_time < timeout:
         method_frame, header_frame, body = channel.basic_get(queue='reply_queue')
