@@ -19,7 +19,7 @@ test success in 3 GPUs with 16GB video memory.
 import torch
 from PIL import Image
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from accelerate import init_empty_weights, load_checkpoint_and_dispatch, infer_auto_device_map
+from accelerate import init_empty_weights, dispatch_model, infer_auto_device_map
 
 MODEL_PATH = "THUDM/cogvlm2-llama3-chat-19B"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -31,24 +31,25 @@ tokenizer = AutoTokenizer.from_pretrained(
     trust_remote_code=True
 )
 
-with init_empty_weights():
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_PATH,
-        torch_dtype=TORCH_TYPE,
-        trust_remote_code=True,
-    )
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_PATH,
+    torch_dtype=TORCH_TYPE,
+    trust_remote_code=True
+)
 
 num_gpus = torch.cuda.device_count()
-max_memory_per_gpu = "16GiB"
+max_memory_per_gpu = "20GiB"
 if num_gpus > 2:
-    max_memory_per_gpu = f"{round(42 / num_gpus)}GiB"
+    max_memory_per_gpu = f"{round(80 / num_gpus)}GiB"
 
 device_map = infer_auto_device_map(
     model=model,
     max_memory={i: max_memory_per_gpu for i in range(num_gpus)},
     no_split_module_classes=["CogVLMDecoderLayer"]
 )
-model = load_checkpoint_and_dispatch(model, MODEL_PATH, device_map=device_map, dtype=TORCH_TYPE)
+
+model = dispatch_model(model, device_map=device_map)
+#model.tie_weights()
 model = model.eval()
 
 text_only_template = "A chat between a curious user and an artificial intelligence assistant. The assistant gives helpful, detailed, and polite answers to the user's questions. USER: {} ASSISTANT:"
@@ -107,7 +108,6 @@ while True:
         with torch.no_grad():
             outputs = model.generate(**inputs, **gen_kwargs)
             outputs = outputs[:, inputs['input_ids'].shape[1]:]
-            response = tokenizer.decode(outputs[0])
-            response = response.split("")[0]
+            response = tokenizer.decode(outputs[0], skip_special_tokens=True)
             print("\nCogVLM2:", response)
         history.append((query, response))
