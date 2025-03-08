@@ -24,6 +24,7 @@ def get_next_message():
     channel.queue_declare(queue='chat_queue', durable=False)
 
     method_frame, header_frame, body = channel.basic_get(queue='chat_queue')
+    connection.close()
     if method_frame:
         channel.basic_ack(method_frame.delivery_tag)
         return json.loads(body)
