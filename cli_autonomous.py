@@ -88,7 +88,7 @@ def main():
     )
 
     num_gpus = torch.cuda.device_count()
-    max_memory_per_gpu = "22GiB"
+    max_memory_per_gpu = "19GiB"
 
     device_map = infer_auto_device_map(
         model=model,
