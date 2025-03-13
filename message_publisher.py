@@ -76,6 +76,10 @@ def chat():
         return jsonify({'reply': reply})
     else:
         return jsonify({'error': 'No reply received within timeout period'}), 504
+    
+@app.route('/ping', methods=['GET'])
+def ping():
+    return 'yes, server is up', 200
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", debug=True)
